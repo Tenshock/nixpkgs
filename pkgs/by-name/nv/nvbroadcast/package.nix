@@ -10,6 +10,7 @@
   gobject-introspection,
   cairo,
   coreutils,
+  darwinMinVersionHook,
   gawk,
   gdk-pixbuf,
   glib,
@@ -49,16 +50,77 @@ let
 
   pyrnnoise = python313Packages.pyrnnoise.override { inherit audiolab; };
 
-  onnxruntimeVersion = "1.24.4";
+  mediapipeDarwin = python313Packages.mediapipe.overridePythonAttrs (oldAttrs: {
+    src = fetchurl {
+      name = "mediapipe-1.0.1-py3-none-macosx_11_0_arm64.whl";
+      url = "https://files.pythonhosted.org/packages/18/56/911762884caba685dc8156d0136c58196a228c2b447023cfa0cfdb32f6c5/mediapipe-1.0.1-py3-none-macosx_11_0_arm64.whl";
+      hash = "sha256-Cp+2eVf30o6E9IXpxnFqQzZ7P28HFw8xw/csrBrd0DE=";
+    };
+    nativeBuildInputs = [ ];
+    buildInputs = [ ];
+    installCheckPhase = ''
+      runHook preInstallCheck
+      ${python313Packages.python.interpreter} -c '
+      import mediapipe as mp
+      import numpy as np
+
+      data = np.zeros((2, 2, 3), dtype=np.uint8)
+      image = mp.Image(image_format=mp.ImageFormat.SRGB, data=data)
+      assert np.array_equal(data, image.numpy_view())
+      '
+      runHook postInstallCheck
+    '';
+    meta = oldAttrs.meta // {
+      sourceProvenance = with lib.sourceTypes; [ binaryNativeCode ];
+      platforms = [ "aarch64-darwin" ];
+    };
+  });
+
+  mediapipe = if stdenv.hostPlatform.isDarwin then mediapipeDarwin else python313Packages.mediapipe;
+
+  mediapipePlatforms = lib.unique (
+    python313Packages.mediapipe.meta.platforms ++ [ "aarch64-darwin" ]
+  );
+
+  pyvirtualcam = python313Packages.buildPythonPackage {
+    pname = "pyvirtualcam";
+    version = "0.14.0";
+    format = "wheel";
+
+    src = fetchurl {
+      name = "pyvirtualcam-0.14.0-cp313-cp313-macosx_11_0_arm64.whl";
+      url = "https://files.pythonhosted.org/packages/49/8f/80b66a5b385bcc598701b6bd33874a1ce1f2beb7ffbb2c8a5df5215c47d7/pyvirtualcam-0.14.0-cp313-cp313-macosx_11_0_arm64.whl";
+      hash = "sha256-pDrtVXoofT7faMMKRYXyXhi+T/njRbHGcebdB/PyZdY=";
+    };
+
+    dependencies = [ python313Packages.numpy ];
+    pythonImportsCheck = [ "pyvirtualcam" ];
+
+    meta = {
+      description = "Send frames to a virtual camera";
+      homepage = "https://github.com/letmaik/pyvirtualcam";
+      license = lib.licenses.gpl2Only;
+      sourceProvenance = with lib.sourceTypes; [ binaryNativeCode ];
+      platforms = [ "aarch64-darwin" ];
+    };
+  };
 
   onnxruntimeWheels = {
     "aarch64-linux" = rec {
-      filename = "onnxruntime-${onnxruntimeVersion}-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
+      version = "1.24.4";
+      filename = "onnxruntime-${version}-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
       url = "https://files.pythonhosted.org/packages/8b/25/d7908de8e08cee9abfa15b8aa82349b79733ae5865162a3609c11598805d/${filename}";
       hash = "sha256-3Equ0eXhqqzyNDyDijCnw63njxPusWgXQR+SnQQEChM=";
     };
+    "aarch64-darwin" = rec {
+      version = "1.23.2";
+      filename = "onnxruntime-${version}-cp313-cp313-macosx_13_0_arm64.whl";
+      url = "https://files.pythonhosted.org/packages/3d/41/fba0cabccecefe4a1b5fc8020c44febb334637f133acefc7ec492029dd2c/${filename}";
+      hash = "sha256-L/UxrYSWKBtCl/Mrg7Ac3XGWF+I1H/4NulaE+yg6+h8=";
+    };
     "x86_64-linux" = rec {
-      filename = "onnxruntime-${onnxruntimeVersion}-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
+      version = "1.24.4";
+      filename = "onnxruntime-${version}-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
       url = "https://files.pythonhosted.org/packages/7f/72/105ec27a78c5aa0154a7c0cd8c41c19a97799c3b12fc30392928997e3be3/${filename}";
       hash = "sha256-4wyXK8AuBykRqrtokUU+xzeVOGwK8rdhtlREuKTEdF8=";
     };
@@ -66,8 +128,8 @@ let
 
   onnxruntimeWheel = onnxruntimeWheels.${stdenv.hostPlatform.system};
 
-  onnxruntime = python313Packages.onnxruntime.overridePythonAttrs (oldAttrs: rec {
-    version = onnxruntimeVersion;
+  onnxruntime = python313Packages.onnxruntime.overridePythonAttrs (oldAttrs: {
+    inherit (onnxruntimeWheel) version;
     src = fetchurl {
       inherit (onnxruntimeWheel) url hash;
     };
@@ -75,6 +137,8 @@ let
       mkdir dist
       cp "$src" "dist/${onnxruntimeWheel.filename}"
     '';
+    nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux oldAttrs.nativeBuildInputs;
+    buildInputs = lib.optionals stdenv.hostPlatform.isLinux oldAttrs.buildInputs;
     meta = oldAttrs.meta // {
       sourceProvenance = with lib.sourceTypes; [ binaryNativeCode ];
       platforms = builtins.attrNames onnxruntimeWheels;
@@ -110,19 +174,20 @@ let
     (with python313Packages; [
       av
       click
-      mediapipe
       numpy
       packaging
       pillow
       psutil
       pygobject3
-      pyrnnoise
       scipy
     ])
     ++ [
+      mediapipe
       onnxruntime
       pythonOnnx
-    ];
+    ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [ pyrnnoise ]
+    ++ lib.optionals stdenv.hostPlatform.isDarwin [ pyvirtualcam ];
 
   pythonPath = python313Packages.makePythonPath pythonDeps;
 
@@ -216,6 +281,9 @@ python313Packages.buildPythonApplication (finalAttrs: {
     gobject-introspection
     makeShellWrapper
     wrapGAppsHook4
+  ]
+  ++ lib.optionals stdenv.hostPlatform.isDarwin [
+    (darwinMinVersionHook "13.0")
   ];
 
   buildInputs = [
@@ -233,12 +301,14 @@ python313Packages.buildPythonApplication (finalAttrs: {
   ];
 
   nativeCheckInputs = [
+    python313Packages.pytestCheckHook
+    writableTmpDirAsHomeHook
+  ]
+  ++ lib.optionals stdenv.hostPlatform.isLinux [
     pipewire
     psmisc
     pulseaudio
-    python313Packages.pytestCheckHook
     v4l-utils-headless
-    writableTmpDirAsHomeHook
   ];
 
   preCheck = ''
@@ -283,6 +353,8 @@ python313Packages.buildPythonApplication (finalAttrs: {
       gst_all_1.gst-plugins-base
       gst_all_1.gst-plugins-good
     ])
+  ]
+  ++ lib.optionals stdenv.hostPlatform.isLinux [
     "--prefix"
     "LD_LIBRARY_PATH"
     ":"
@@ -305,6 +377,8 @@ python313Packages.buildPythonApplication (finalAttrs: {
       pulseaudio
       v4l-utils-headless
     ])
+  ]
+  ++ [
     # Upstream launches child Python processes via sys.executable.
     "--prefix"
     "PYTHONPATH"
@@ -312,7 +386,7 @@ python313Packages.buildPythonApplication (finalAttrs: {
     "${placeholder "out"}/${python313Packages.python.sitePackages}:${pythonPath}"
   ];
 
-  postFixup = ''
+  postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
     mv "$out/bin/nvbroadcast" "$out/bin/.nvbroadcast-gapps-wrapped"
     makeShellWrapper "$out/bin/.nvbroadcast-gapps-wrapped" "$out/bin/nvbroadcast" \
       --run ${requirementsCheck}
@@ -339,7 +413,7 @@ python313Packages.buildPythonApplication (finalAttrs: {
         import mediapipe
         import onnxruntime
         from nvbroadcast.core import dependency_installer, resources
-        assert onnxruntime.__version__ == "1.24.4"
+        assert onnxruntime.__version__ == "${onnxruntimeWheel.version}"
         runtime_site = os.environ["NVBROADCAST_RUNTIME_SITE"]
         assert runtime_site not in sys.path
         assert not os.path.exists(runtime_site)
@@ -353,6 +427,8 @@ python313Packages.buildPythonApplication (finalAttrs: {
         touch $out
       '';
 
+    }
+    // lib.optionalAttrs stdenv.hostPlatform.isLinux {
       inherit (nixosTests) nvbroadcast;
     };
   };
@@ -370,8 +446,6 @@ python313Packages.buildPythonApplication (finalAttrs: {
     license = lib.licenses.gpl3Plus;
     maintainers = with lib.maintainers; [ Tenshock ];
     mainProgram = "nvbroadcast";
-    platforms = lib.intersectLists python313Packages.mediapipe.meta.platforms (
-      builtins.attrNames onnxruntimeWheels
-    );
+    platforms = lib.intersectLists mediapipePlatforms (builtins.attrNames onnxruntimeWheels);
   };
 })

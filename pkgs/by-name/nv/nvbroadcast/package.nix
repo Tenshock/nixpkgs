@@ -49,19 +49,35 @@ let
 
   pyrnnoise = python313Packages.pyrnnoise.override { inherit audiolab; };
 
-  onnxruntime = python313Packages.onnxruntime.overridePythonAttrs (oldAttrs: rec {
-    version = "1.24.4";
-    src = fetchurl {
-      url = "https://files.pythonhosted.org/packages/7f/72/105ec27a78c5aa0154a7c0cd8c41c19a97799c3b12fc30392928997e3be3/onnxruntime-${version}-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
+  onnxruntimeVersion = "1.24.4";
+
+  onnxruntimeWheels = {
+    "aarch64-linux" = rec {
+      filename = "onnxruntime-${onnxruntimeVersion}-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
+      url = "https://files.pythonhosted.org/packages/8b/25/d7908de8e08cee9abfa15b8aa82349b79733ae5865162a3609c11598805d/${filename}";
+      hash = "sha256-3Equ0eXhqqzyNDyDijCnw63njxPusWgXQR+SnQQEChM=";
+    };
+    "x86_64-linux" = rec {
+      filename = "onnxruntime-${onnxruntimeVersion}-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
+      url = "https://files.pythonhosted.org/packages/7f/72/105ec27a78c5aa0154a7c0cd8c41c19a97799c3b12fc30392928997e3be3/${filename}";
       hash = "sha256-4wyXK8AuBykRqrtokUU+xzeVOGwK8rdhtlREuKTEdF8=";
+    };
+  };
+
+  onnxruntimeWheel = onnxruntimeWheels.${stdenv.hostPlatform.system};
+
+  onnxruntime = python313Packages.onnxruntime.overridePythonAttrs (oldAttrs: rec {
+    version = onnxruntimeVersion;
+    src = fetchurl {
+      inherit (onnxruntimeWheel) url hash;
     };
     unpackPhase = ''
       mkdir dist
-      cp "$src" "dist/onnxruntime-${version}-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+      cp "$src" "dist/${onnxruntimeWheel.filename}"
     '';
     meta = oldAttrs.meta // {
       sourceProvenance = with lib.sourceTypes; [ binaryNativeCode ];
-      platforms = [ "x86_64-linux" ];
+      platforms = builtins.attrNames onnxruntimeWheels;
     };
   });
 
@@ -354,6 +370,8 @@ python313Packages.buildPythonApplication (finalAttrs: {
     license = lib.licenses.gpl3Plus;
     maintainers = with lib.maintainers; [ Tenshock ];
     mainProgram = "nvbroadcast";
-    platforms = python313Packages.mediapipe.meta.platforms;
+    platforms = lib.intersectLists python313Packages.mediapipe.meta.platforms (
+      builtins.attrNames onnxruntimeWheels
+    );
   };
 })
